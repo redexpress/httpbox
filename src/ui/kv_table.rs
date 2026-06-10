@@ -12,10 +12,23 @@ pub fn render_kv_table(ui: &mut egui::Ui, kvs: &mut Vec<KeyValue>) {
     let value_w = (available_w - key_w - x_btn_w - 24.0 - 32.0 - gap * 4.0).max(120.0);
 
     if kvs.is_empty() {
+        kvs.push(KeyValue::new("", ""));
+    }
+
+    let has_real_entries = kvs.iter().any(|kv| !kv.key.is_empty() || !kv.value.is_empty());
+    let last_has_content = kvs
+        .last()
+        .map(|kv| !kv.key.is_empty() || !kv.value.is_empty())
+        .unwrap_or(false);
+    if has_real_entries && last_has_content {
+        kvs.push(KeyValue::new("", ""));
+    }
+
+    if kvs.len() == 1 && kvs[0].key.is_empty() && kvs[0].value.is_empty() {
         ui.vertical_centered(|ui| {
             ui.add_space(12.0);
             ui.label(
-                egui::RichText::new("No entries. Click \"+ Add\" to create one.")
+                egui::RichText::new("Type a key to add an entry")
                     .color(egui::Color32::from_rgb(120, 120, 130))
                     .italics()
                     .size(12.0),
@@ -38,10 +51,14 @@ pub fn render_kv_table(ui: &mut egui::Ui, kvs: &mut Vec<KeyValue>) {
         ui.add_space(4.0);
     }
 
-    for (i, kv) in kvs.iter_mut().enumerate() {
+    let total = kvs.len();
+    for i in 0..total {
+        let kv = &mut kvs[i];
         let mut key = kv.key.clone();
         let mut value = kv.value.clone();
         let mut enabled = kv.enabled;
+        let is_last = i + 1 == total;
+        let is_empty_row = key.is_empty() && value.is_empty() && is_last;
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
@@ -97,7 +114,7 @@ pub fn render_kv_table(ui: &mut egui::Ui, kvs: &mut Vec<KeyValue>) {
                 ui.ctx().request_repaint();
             }
 
-            if ui
+            let remove_clicked = ui
                 .add(
                     egui::Button::new(
                         egui::RichText::new("×")
@@ -109,32 +126,37 @@ pub fn render_kv_table(ui: &mut egui::Ui, kvs: &mut Vec<KeyValue>) {
                     .fill(egui::Color32::from_rgb(250, 235, 238))
                     .rounding(egui::Rounding::same(4.0)),
                 )
-                .clicked()
-            {
-                to_remove = Some(i);
+                .clicked();
+
+            if remove_clicked {
+                if is_empty_row {
+                    if key.is_empty() && value.is_empty() {
+                        // keep at least one empty row; just clear and do nothing
+                    } else {
+                        key.clear();
+                        value.clear();
+                    }
+                } else if key.is_empty() && value.is_empty() {
+                    to_remove = Some(i);
+                } else {
+                    // Mark for removal but preserve at least one empty row
+                    if total > 1 {
+                        to_remove = Some(i);
+                    } else {
+                        key.clear();
+                        value.clear();
+                    }
+                }
             }
         });
 
-        kv.key = key;
-        kv.value = value;
-        kv.enabled = enabled;
+        kvs[i].key = key;
+        kvs[i].value = value;
+        kvs[i].enabled = enabled;
         ui.add_space(4.0);
     }
 
     if let Some(i) = to_remove {
         kvs.remove(i);
-    }
-
-    ui.add_space(4.0);
-    if ui
-        .add(
-            egui::Button::new(egui::RichText::new("+ Add").size(13.0).strong())
-                .min_size(egui::vec2(80.0, 24.0))
-                .fill(egui::Color32::from_rgb(55, 90, 140))
-                .rounding(egui::Rounding::same(4.0)),
-        )
-        .clicked()
-    {
-        kvs.push(KeyValue::new("", ""));
     }
 }
