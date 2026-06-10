@@ -1,0 +1,105 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            bin: httpbox
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+            bin: httpbox.exe
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+            bin: httpbox
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+            bin: httpbox
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry & target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }} --locked
+
+      - name: Package (Linux/macOS)
+        if: matrix.archive == 'tar.gz'
+        working-directory: target/${{ matrix.target }}/release
+        run: |
+          mkdir -p httpbox-${{ github.ref_name }}-${{ matrix.target }}
+          cp ${{ matrix.bin }} httpbox-${{ github.ref_name }}-${{ matrix.target }}/
+          tar -czf httpbox-${{ github.ref_name }}-${{ matrix.target }}.tar.gz httpbox-${{ github.ref_name }}-${{ matrix.target }}
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        working-directory: target/${{ matrix.target }}/release
+        run: |
+          New-Item -ItemType Directory -Path httpbox-${{ env.RELEASE_TAG }}-${{ matrix.target }} -Force | Out-Null
+          Copy-Item ${{ matrix.bin }} httpbox-${{ env.RELEASE_TAG }}-${{ matrix.target }}/
+          Compress-Archive -Path httpbox-${{ env.RELEASE_TAG }}-${{ matrix.target }} -DestinationPath httpbox-${{ env.RELEASE_TAG }}-${{ matrix.target }}.zip
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: httpbox-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/httpbox-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: ls -laR artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
